@@ -174,9 +174,9 @@ slog/
 
 - [x] Phase 7: E2E CLI tests (full CLI test suite — every command exercised against isolated server/db instances)
 
-- [ ] Phase 8: Build and binary (bun build --compile, package.json scripts)
+- [x] Phase 8: Build and binary (bun build --compile, package.json scripts)
 
-- [ ] Phase 9: [skill.md](http://skill.md) (agent instructions: start server, log to it, query, debug patterns)
+- [x] Phase 9: [skill.md](http://skill.md) (agent instructions: start server, log to it, query, debug patterns)
 
 &lt;!-- IMPORTANT: Mark phases complete with \[x\] as you finish them. Update this file immediately after completing each phase - do not batch updates. --&gt;
 
