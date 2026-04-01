@@ -79,10 +79,11 @@ async function cmdServe() {
   // If --daemon flag, we're the child process — run the server
   if (hasFlag("--daemon")) {
     const db = initDb(dbPath);
-    const server = createServer(db);
+    const server = createServer(db, port);
 
     const cleanup = () => {
       removePidfile(pidPath);
+      server.stop();
       db.close();
       process.exit(0);
     };
@@ -90,21 +91,23 @@ async function cmdServe() {
     process.on("SIGINT", cleanup);
     process.on("SIGTERM", cleanup);
 
-    await server.listen({ port, host: "127.0.0.1" });
-
     writePidfile(pidPath, { pid: process.pid, port, db: dbPath });
     console.log(`slog server started (pid=${process.pid}, port=${port}, db=${dbPath})`);
     return;
   }
 
   // Parent process: spawn daemonized child
-  const child = Bun.spawn(
-    [process.argv[0]!, ...process.argv.slice(1), "--daemon"],
-    {
-      stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env },
-    }
-  );
+  // Compiled binaries: process.argv[0] is "bun" and argv[1] is /$bunfs/... (virtual),
+  // so use process.execPath (the real binary path) + the CLI args.
+  // Dev mode (bun src/cli.ts): process.execPath is the bun binary, argv[1] is the script.
+  const isCompiled = process.argv[1]?.startsWith("/$bunfs/");
+  const cmd = isCompiled
+    ? [process.execPath, ...args, "--daemon"]
+    : [...process.argv, "--daemon"];
+  const child = Bun.spawn(cmd, {
+    stdio: ["ignore", "pipe", "pipe"],
+    env: { ...process.env },
+  });
 
   // Unref so parent can exit
   child.unref();

@@ -3,7 +3,15 @@ import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
-const CLI_PATH = join(import.meta.dir, "..", "src", "cli.ts");
+// SLOG_BIN env var: path to compiled binary. If unset, runs via `bun src/cli.ts`.
+const SLOG_BIN = process.env.SLOG_BIN;
+
+function slogCommand(): string[] {
+  if (SLOG_BIN) {
+    return [SLOG_BIN];
+  }
+  return ["bun", join(import.meta.dir, "..", "src", "cli.ts")];
+}
 
 export interface SpawnResult {
   stdout: string;
@@ -12,7 +20,8 @@ export interface SpawnResult {
 }
 
 export async function spawnSlog(...args: string[]): Promise<SpawnResult> {
-  const proc = spawn(["bun", CLI_PATH, ...args], {
+  const cmd = [...slogCommand(), ...args];
+  const proc = spawn(cmd, {
     stdout: "pipe",
     stderr: "pipe",
     env: { ...process.env },

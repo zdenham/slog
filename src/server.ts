@@ -1,37 +1,49 @@
-import Fastify from "fastify";
 import type { Database } from "bun:sqlite";
 import { ingestLogs } from "./ingest.ts";
 import type { LogInput } from "./types.ts";
 
-export function createServer(db: Database) {
-  const app = Fastify({ logger: false });
+export function createServer(db: Database, port: number, host = "127.0.0.1") {
+  const server = Bun.serve({
+    port,
+    hostname: host,
+    routes: {
+      "/health": {
+        GET: () => Response.json({ ok: true }),
+      },
+      "/log": {
+        POST: async (req) => {
+          let body: unknown;
+          try {
+            body = await req.json();
+          } catch {
+            return Response.json({ error: "Invalid JSON" }, { status: 400 });
+          }
 
-  app.post("/log", async (request, reply) => {
-    const body = request.body;
+          if (!body || typeof body !== "object") {
+            return Response.json({ error: "Request body must be JSON" }, { status: 400 });
+          }
 
-    if (!body || typeof body !== "object") {
-      return reply.status(400).send({ error: "Request body must be JSON" });
-    }
+          const entries = Array.isArray(body) ? body : [body];
 
-    const entries = Array.isArray(body) ? body : [body];
+          for (const entry of entries) {
+            if (!entry || typeof entry !== "object" || !("message" in entry) || typeof entry.message !== "string") {
+              return Response.json(
+                { error: "Each log entry must have a 'message' string field" },
+                { status: 400 }
+              );
+            }
+          }
 
-    for (const entry of entries) {
-      if (!entry || typeof entry !== "object" || !("message" in entry) || typeof entry.message !== "string") {
-        return reply.status(400).send({ error: "Each log entry must have a 'message' string field" });
-      }
-    }
-
-    try {
-      const count = ingestLogs(db, body as LogInput | LogInput[]);
-      return reply.send({ ingested: count });
-    } catch (err) {
-      return reply.status(500).send({ error: "Database error" });
-    }
+          try {
+            const count = ingestLogs(db, body as LogInput | LogInput[]);
+            return Response.json({ ingested: count });
+          } catch {
+            return Response.json({ error: "Database error" }, { status: 500 });
+          }
+        },
+      },
+    },
   });
 
-  app.get("/health", async (_request, reply) => {
-    return reply.send({ ok: true });
-  });
-
-  return app;
+  return server;
 }
