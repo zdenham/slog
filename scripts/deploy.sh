@@ -4,6 +4,11 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+# Ensure bun is on PATH
+if ! command -v bun &>/dev/null; then
+  export PATH="$HOME/.bun/bin:$PATH"
+fi
+
 BUCKET="slog-builds"
 BASE_URL="https://pub-dfc2c649e67847a89ddc778f1b506f58.r2.dev"
 
@@ -26,7 +31,7 @@ fi
 
 # Preflight: verify Cloudflare auth
 echo "Verifying Cloudflare authentication..."
-if ! npx wrangler r2 bucket list &>/dev/null; then
+if ! bunx wrangler r2 bucket list &>/dev/null; then
   echo "Error: Cloudflare authentication failed."
   echo "Please check CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID in .env"
   exit 1
@@ -67,18 +72,18 @@ sed "s|__BASE_URL__|${BASE_URL}|g" scripts/install.sh > dist/install.sh
 # Upload to R2
 echo "Uploading to R2..."
 
-npx wrangler r2 object put "$BUCKET/install.sh" \
+bunx wrangler r2 object put "$BUCKET/install.sh" \
   --file=dist/install.sh --content-type="text/plain" --remote
 
 echo -n "$TAG" > dist/latest
-npx wrangler r2 object put "$BUCKET/latest" \
+bunx wrangler r2 object put "$BUCKET/latest" \
   --file=dist/latest --content-type="text/plain" --remote
 
-npx wrangler r2 object put "$BUCKET/$TAG/skill.md" \
+bunx wrangler r2 object put "$BUCKET/$TAG/skill.md" \
   --file=skill.md --content-type="text/plain" --remote
 
 for target in darwin-arm64 darwin-x64; do
-  npx wrangler r2 object put "$BUCKET/$TAG/bin/slog-$target" \
+  bunx wrangler r2 object put "$BUCKET/$TAG/bin/slog-$target" \
     --file="dist/slog-$target" --content-type="application/octet-stream" --remote
 done
 
