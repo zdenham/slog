@@ -2,6 +2,20 @@
 
 A local log drain that accepts logs over HTTP, stores them in SQLite, and lets you query them from the CLI. Ships as a single Bun-compiled binary.
 
+## Install
+
+```bash
+curl -fsSL https://pub-dfc2c649e67847a89ddc778f1b506f58.r2.dev/install.sh | bash
+```
+
+This downloads the latest binary to `~/.slog/bin`, adds it to your PATH, and optionally installs the skill file.
+
+For non-interactive installs (CI, scripts):
+
+```bash
+curl -fsSL https://pub-dfc2c649e67847a89ddc778f1b506f58.r2.dev/install.sh | bash -s -- --yes
+```
+
 ## Quick Start
 
 ```bash

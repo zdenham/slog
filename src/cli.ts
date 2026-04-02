@@ -340,6 +340,12 @@ Options:
   --pidfile <path> Pidfile path (default: ${DEFAULT_PID_PATH})`);
 }
 
+if (hasFlag("--version") || hasFlag("-v")) {
+  const { VERSION } = await import("./version.ts");
+  console.log(`v${VERSION}`);
+  process.exit(0);
+}
+
 switch (command) {
   case "serve":
     await cmdServe();

@@ -7,6 +7,10 @@ dist
 *.tgz
 /slog
 
+# compiled platform binaries (built by scripts/build-npm.sh)
+npm/slog-*/slog
+npm/slog-*/slog.exe
+
 # code coverage
 coverage
 *.lcov

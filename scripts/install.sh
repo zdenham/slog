@@ -7,9 +7,11 @@ BINARY_NAME="slog"
 
 # Parse flags
 AUTO_YES=false
+SKIP_SKILL=false
 for arg in "$@"; do
   case "$arg" in
     --yes|-y) AUTO_YES=true ;;
+    --skip-skill) SKIP_SKILL=true ;;
   esac
 done
 
@@ -72,10 +74,10 @@ fi
 if echo "$PATH" | tr ':' '\n' | grep -qx "$INSTALL_DIR"; then
   success "PATH already includes $INSTALL_DIR"
 else
-  # Detect shell profile
+  # Detect shell profile — use env file so non-interactive shells (e.g. Claude Code) also get it
   SHELL_NAME=$(basename "$SHELL")
   case "$SHELL_NAME" in
-    zsh) PROFILE="$HOME/.zshrc" ;;
+    zsh) PROFILE="$HOME/.zshenv" ;;
     bash)
       if [ -f "$HOME/.bash_profile" ]; then
         PROFILE="$HOME/.bash_profile"
@@ -95,31 +97,34 @@ else
     *)
       echo '' >> "$PROFILE"
       echo 'export PATH="$HOME/.slog/bin:$PATH"' >> "$PROFILE"
-      success "Added to $PROFILE"
-      echo "  Run: source $PROFILE (or open a new terminal)"
+      success "Added to $PROFILE — restart your shell or run: source $PROFILE"
       ;;
   esac
 fi
 
 # 6. Install skill
-answer=$(prompt "Install slog skill? [Y/n]" "Y")
-case "$answer" in
-  [nN]*)
-    info "Skipping skill install"
-    ;;
-  *)
-    if [ "$AUTO_YES" = true ]; then
-      SKILL_DIR="."
-    else
-      printf "Skill directory [default: current directory]: " </dev/tty >/dev/tty
-      read -r SKILL_DIR </dev/tty
-      SKILL_DIR="${SKILL_DIR:-.}"
-    fi
-    mkdir -p "$SKILL_DIR"
-    curl -fsSL "$BASE_URL/$VERSION/skill.md" -o "$SKILL_DIR/slog.md" || error "Failed to download skill"
-    success "Skill installed to $SKILL_DIR/slog.md"
-    ;;
-esac
+if [ "$SKIP_SKILL" = true ]; then
+  info "Skipping skill install (--skip-skill)"
+else
+  answer=$(prompt "Install slog skill? [Y/n]" "Y")
+  case "$answer" in
+    [nN]*)
+      info "Skipping skill install"
+      ;;
+    *)
+      if [ "$AUTO_YES" = true ]; then
+        SKILL_DIR="."
+      else
+        printf "Skill directory [default: current directory]: " </dev/tty >/dev/tty
+        read -r SKILL_DIR </dev/tty
+        SKILL_DIR="${SKILL_DIR:-.}"
+      fi
+      mkdir -p "$SKILL_DIR"
+      curl -fsSL "$BASE_URL/$VERSION/skill.md" -o "$SKILL_DIR/slog.md" || error "Failed to download skill"
+      success "Skill installed to $SKILL_DIR/slog.md"
+      ;;
+  esac
+fi
 
 # 7. Summary
 echo ""

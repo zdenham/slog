@@ -1,110 +1,186 @@
 # slog — Local Log Drain
 
-slog is a local log drain that accepts logs over HTTP and stores them in SQLite. Applications post logs to the server; agents and humans query them.
+HTTP log drain backed by SQLite. Apps post logs; agents and humans query them.
 
-## Quick Start
+## Before You Start
 
-```bash
-# Ensure the server is running (idempotent — safe to call repeatedly)
-slog serve
+1. **Start the server:** `slog serve` (idempotent)
+2. **Add a logger helper** to the project if one doesn't exist. Pick the language that matches. The helper must:
+   - **Set `timestamp` at log time** (epoch ms). The server falls back to receive time if omitted, which is wrong for batched logs.
+   - **Batch logs.** Buffer entries, flush periodically or at a size threshold. `/log` accepts arrays.
+   - **Be best-effort.** Swallow network errors silently.
+   - **Gate on `SLOG=1`.** No-op when unset. Keeps slog out of production.
 
-# Check server status
-slog status
+## Logger Helpers
 
-# View recent logs
-slog query
-
-# Tail logs (live)
-slog tail --follow
-```
-
-## Reading Logs
-
-### Default query (last 50 logs with properties)
-
-```bash
-slog query
-```
-
-### Custom SQL queries
-
-```bash
-# Recent errors
-slog query "SELECT e.event, e.timestamp, p.value_string as level FROM log_events e JOIN log_props p ON e.event_id = p.event_id WHERE p.key = 'level' AND p.value_string = 'error' ORDER BY e.timestamp DESC LIMIT 20"
-
-# Filter by source
-slog query "SELECT e.event FROM log_events e JOIN log_props p ON e.event_id = p.event_id WHERE p.key = 'source' AND p.value_string = 'api' ORDER BY e.timestamp DESC LIMIT 20"
-
-# Correlate by request_id
-slog query "SELECT e.event, e.timestamp FROM log_events e JOIN log_props p ON e.event_id = p.event_id WHERE p.key = 'request_id' AND p.value_string = 'abc123' ORDER BY e.timestamp ASC"
-
-# Time range (last hour)
-slog query "SELECT * FROM log_events WHERE timestamp > (strftime('%s','now') * 1000 - 3600000) ORDER BY timestamp DESC"
-
-# Count by level
-slog query "SELECT p.value_string as level, count(*) as count FROM log_props p WHERE p.key = 'level' GROUP BY p.value_string"
-```
-
-### Schema reference
-
-```sql
--- log_events: one row per log entry
---   event_id (TEXT, ULID), event (TEXT, message), timestamp (INTEGER, epoch ms)
-
--- log_props: EAV properties for each event
---   event_id (TEXT), key (TEXT), value_string (TEXT), value_number (REAL), value_bool (INTEGER)
-```
-
-## Managing Logs
-
-```bash
-# Clear all logs
-slog clear --yes
-
-# Check if server is running
-slog status
-
-# Get just the port (for scripting)
-slog status --port
-```
-
-## How Applications Post Logs
-
-Applications instrument their own code with an HTTP POST to the slog server. The agent's role is to help instrument app code, not to post logs directly.
-
-### Minimal HTTP helper example
+### TypeScript / JavaScript
 
 ```typescript
-const SLOG_PORT = 4526; // default port
+const SLOG_ENABLED = process.env.SLOG === "1";
+const SLOG_URL = "http://127.0.0.1:4526/log";
 
-async function slog(message: string, props: Record<string, unknown> = {}) {
+type LogEntry = { message: string; timestamp: number; [key: string]: unknown };
+let buffer: LogEntry[] = [];
+let timer: ReturnType<typeof setTimeout> | null = null;
+
+async function flush() {
+  timer = null;
+  if (buffer.length === 0) return;
+  const batch = buffer;
+  buffer = [];
   try {
-    await fetch(`http://127.0.0.1:${SLOG_PORT}/log`, {
+    await fetch(SLOG_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message, ...props }),
+      body: JSON.stringify(batch),
     });
-  } catch {
-    // slog is best-effort — don't crash the app if logging fails
-  }
+  } catch {}
 }
 
-// Usage
-await slog("Request handled", { source: "api", level: "info", http: { status: 200, method: "GET" } });
+export function slog(message: string, props: Record<string, unknown> = {}) {
+  if (!SLOG_ENABLED) return;
+  buffer.push({ message, timestamp: Date.now(), ...props });
+  if (buffer.length >= 50) flush();
+  else if (!timer) timer = setTimeout(flush, 1000);
+}
+
+// SLOG=1 bun run app.ts
+slog("Request handled", { source: "api", level: "info", status: 200 });
 ```
 
-Nested objects are flattened with dot notation (e.g., `http.status`). Property types are preserved: strings, numbers, and booleans are stored in typed columns for correct querying.
+### Python
 
-## Error Handling
+```python
+import os, time, threading, requests
 
-Query errors are returned as plain text on stderr — no JSON parsing needed. If a SQL query has a syntax error, slog prints the SQLite error message directly.
+SLOG_ENABLED = os.environ.get("SLOG") == "1"
+SLOG_URL = "http://127.0.0.1:4526/log"
 
-## Port & Pidfile
+_buffer, _lock, _timer = [], threading.Lock(), None
 
-The server writes its info to `~/.slog/slog.pid`:
+def _flush():
+    global _timer
+    with _lock:
+        if not _buffer:
+            _timer = None
+            return
+        batch, _buffer[:] = list(_buffer), []
+        _timer = None
+    try:
+        requests.post(SLOG_URL, json=batch, timeout=2)
+    except Exception:
+        pass
+
+def _schedule():
+    global _timer
+    if _timer is None:
+        _timer = threading.Timer(1.0, _flush)
+        _timer.daemon = True
+        _timer.start()
+
+def slog(message: str, **props):
+    if not SLOG_ENABLED: return
+    with _lock:
+        _buffer.append({"message": message, "timestamp": int(time.time() * 1000), **props})
+        if len(_buffer) >= 50: threading.Thread(target=_flush, daemon=True).start()
+        else: _schedule()
+
+# SLOG=1 python app.py
+slog("Request handled", source="api", level="info", status=200)
+```
+
+### Go
+
+```go
+package slog
+
+import (
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"os"
+	"sync"
+	"time"
+)
+
+var enabled = os.Getenv("SLOG") == "1"
+
+type entry = map[string]any
+
+var (
+	mu     sync.Mutex
+	buf    []entry
+	tmr    *time.Timer
+)
+
+func flush() {
+	mu.Lock()
+	if len(buf) == 0 { mu.Unlock(); return }
+	batch := buf; buf = nil; tmr = nil
+	mu.Unlock()
+	data, _ := json.Marshal(batch)
+	http.Post("http://127.0.0.1:4526/log", "application/json", bytes.NewReader(data)) //nolint:errcheck
+}
+
+func Log(message string, props map[string]any) {
+	if !enabled { return }
+	e := entry{"message": message, "timestamp": time.Now().UnixMilli()}
+	for k, v := range props { e[k] = v }
+	mu.Lock()
+	buf = append(buf, e)
+	if len(buf) >= 50 { mu.Unlock(); go flush(); return }
+	if tmr == nil { tmr = time.AfterFunc(time.Second, flush) }
+	mu.Unlock()
+}
+
+// SLOG=1 go run .
+```
+
+### Shell (no batching)
+
+```bash
+slog_log() {
+  [ "$SLOG" = "1" ] || return 0
+  local msg="$1"; shift
+  local ts=$(($(date +%s) * 1000))
+  local json="{\"message\":\"$msg\",\"timestamp\":$ts"
+  while [ $# -gt 0 ]; do json="$json,\"$1\":\"$2\""; shift 2; done
+  curl -sf -X POST http://127.0.0.1:4526/log \
+    -H "Content-Type: application/json" -d "$json}" >/dev/null 2>&1 &
+}
+# SLOG=1 ./deploy.sh
+slog_log "deploy started" env production version v1.2.3
+```
+
+## Log Format
+
+`POST /log` — single object or array. Must have a `message` string. All other fields become queryable properties. Nested objects are flattened with dot notation (`http.status`). Timestamps are epoch ms — set at creation time, not flush time.
 
 ```json
-{ "pid": 12345, "port": 4526, "db": "/Users/you/.slog/slog.db" }
+{"message": "Request handled", "timestamp": 1711929600000, "source": "api", "level": "info", "status": 200}
 ```
 
-Check this file before starting a new server. `slog serve` is idempotent — it checks the pidfile and exits cleanly if a server is already running.
+## Querying
+
+```bash
+slog query                    # last 50 logs with properties
+slog tail                     # recent logs
+slog tail --follow            # live tail
+```
+
+Custom SQL — `log_events` (event_id, event, timestamp) joined to `log_props` (event_id, key, value_string, value_number, value_bool):
+
+```bash
+slog query "SELECT e.event, e.timestamp, p.value_string as level FROM log_events e JOIN log_props p ON e.event_id = p.event_id WHERE p.key = 'level' AND p.value_string = 'error' ORDER BY e.timestamp DESC LIMIT 20"
+```
+
+## Management
+
+```bash
+slog serve          # start server (idempotent)
+slog status         # pid, port, db path
+slog status --port  # just the port
+slog clear --yes    # delete all logs
+```
+
+Errors print to stderr as plain text. Server pidfile: `~/.slog/slog.pid`.
