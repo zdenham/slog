@@ -4,12 +4,19 @@ HTTP log drain backed by SQLite. Apps post logs; agents and humans query them.
 
 ## Before You Start
 
-1. **Start the server:** `slog serve` (idempotent)
-2. **Add a logger helper** to the project if one doesn't exist. Pick the language that matches. The helper must:
+1. **Ensure slog is installed.** Check if `~/.slog/bin/slog` exists. If not, install it:
+   ```bash
+   curl -fsSL https://pub-dfc2c649e67847a89ddc778f1b506f58.r2.dev/install.sh | bash -s -- --yes --skip-skill
+   ```
+   If the binary exists but `which slog` fails, add it to PATH: `export PATH="$HOME/.slog/bin:$PATH"`
+2. **Start the server:** `slog serve` (idempotent)
+3. **Add a logger helper** to the project if one doesn't exist. Pick the language that matches. The helper must:
    - **Set `timestamp` at log time** (epoch ms). The server falls back to receive time if omitted, which is wrong for batched logs.
    - **Batch logs.** Buffer entries, flush periodically or at a size threshold. `/log` accepts arrays.
    - **Be best-effort.** Swallow network errors silently.
    - **Gate on `SLOG=1`.** No-op when unset. Keeps slog out of production.
+4. **Add slog calls** to the code you're debugging. Log meaningful events with structured properties (e.g. `slog("query executed", { table: "users", rows: 42 })`). Run the app with `SLOG=1`.
+5. **Query the logs** to inspect what happened: `slog query` for recent logs, `slog tail --follow` for live tail, or custom SQL for targeted searches.
 
 ## Logger Helpers
 
