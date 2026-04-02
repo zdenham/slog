@@ -6,8 +6,11 @@
   "scripts": {
     "dev": "bun run src/cli.ts",
     "build": "bun build --compile src/cli.ts --outfile slog",
+    "build:npm": "bash scripts/build-npm.sh",
     "test": "bun test",
-    "test:bin": "bun run build && SLOG_BIN=./slog bun test"
+    "test:bin": "bun run build && SLOG_BIN=./slog bun test",
+    "deploy": "bash scripts/deploy.sh",
+    "test:e2e": "bash scripts/test-e2e.sh"
   },
   "devDependencies": {
     "@types/bun": "^1.3.11",
